@@ -5,11 +5,22 @@
 
 // Variables statiques
 int8_t Lecteur::currentChannel = -1;
+uint8_t Lecteur::currentTcaAddress = 0xFF; // Valeur invalide pour forcer l'initialisation
 PN532* Lecteur::nfc = nullptr;
 
-// Constructeur
+// Constructeur avec TCA par défaut
 Lecteur::Lecteur(uint8_t ch, uint8_t* uid, uint8_t uidLength) 
-  : channel(ch), expectedUIDLength(uidLength), state(false) {
+  : tcaAddress(TCA_ADDR), channel(ch), expectedUIDLength(uidLength), state(false) {
+  
+  // Copier l'UID attendu
+  for (uint8_t i = 0; i < uidLength && i < 7; i++) {
+    expectedUID[i] = uid[i];
+  }
+}
+
+// Constructeur avec TCA personnalisé
+Lecteur::Lecteur(uint8_t tcaAddr, uint8_t ch, uint8_t* uid, uint8_t uidLength) 
+  : tcaAddress(tcaAddr), channel(ch), expectedUIDLength(uidLength), state(false) {
   
   // Copier l'UID attendu
   for (uint8_t i = 0; i < uidLength && i < 7; i++) {
@@ -22,35 +33,44 @@ void Lecteur::setNFCInstance(PN532* nfcInstance) {
   nfc = nfcInstance;
 }
 
-// Sélection optimisée du canal TCA
-bool Lecteur::tcaSelect(uint8_t channel) {
+// Sélection optimisée du canal TCA avec adresse spécifique
+bool Lecteur::tcaSelect(uint8_t tcaAddress, uint8_t channel) {
   if (channel > 7) {
     Serial.print("Canal invalide : ");
     Serial.println(channel);
     return false;
   }
 
-  // Éviter la commutation si déjà sur le bon canal
-  if (currentChannel == channel) {
+  // Éviter la commutation si déjà sur le bon TCA et canal
+  if (currentTcaAddress == tcaAddress && currentChannel == channel) {
     return true;
   }
 
-  Wire.beginTransmission(TCA_ADDR);
+  Wire.beginTransmission(tcaAddress);
   Wire.write(1 << channel);
   uint8_t error = Wire.endTransmission();
 
   if (error != 0) {
-    Serial.print("Erreur sélection canal ");
+    Serial.print("Erreur sélection TCA 0x");
+    Serial.print(tcaAddress, HEX);
+    Serial.print(" canal ");
     Serial.print(channel);
     Serial.print(" -> Code I2C: ");
     Serial.println(error);
     currentChannel = -1;
+    currentTcaAddress = 0xFF;
     return false;
   }
 
+  currentTcaAddress = tcaAddress;
   currentChannel = channel;
   delay(20);
   return true;
+}
+
+// Version compatible avec l'ancien code (utilise TCA par défaut)
+bool Lecteur::tcaSelect(uint8_t channel) {
+  return tcaSelect(TCA_ADDR, channel);
 }
 
 // Comparer deux UIDs
@@ -70,8 +90,8 @@ bool Lecteur::readCard() {
     return false;
   }
 
-  // Sélectionner le canal
-  if (!tcaSelect(channel)) {
+  // Sélectionner le canal sur le bon TCA
+  if (!tcaSelect(tcaAddress, channel)) {
     state = false;
     return false;
   }
@@ -107,6 +127,11 @@ bool Lecteur::isValid() const {
 // Obtenir le canal du lecteur
 uint8_t Lecteur::getChannel() const {
   return channel;
+}
+
+// Obtenir l'adresse TCA du lecteur
+uint8_t Lecteur::getTcaAddress() const {
+  return tcaAddress;
 }
 
 // Afficher un UID (utilitaire)
